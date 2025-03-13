@@ -56,6 +56,28 @@ semaphore = asyncio.Semaphore(3)
 
 GROUP_NAME_CACHE = {}
 
+def slash_split_text(text: str) -> list[tuple[str, float]]:
+    """按反斜杠分割文本
+    
+    参数:
+        text: 要分割的文本
+        
+    返回:
+        list[tuple[str, float]]: 分割后的文本及延时
+    """
+    results = []
+    if "\\" in text:
+        segments = text.split("\\")
+        for segment in segments:
+            if segment.strip():
+                # 每个字符的延时乘以随机因子
+                delay = random.random() * len(segment.strip())
+                results.append((segment.strip(), min(delay, 5.0)))
+    else:
+        # 如果没有反斜杠，则将整个文本作为一个片段返回
+        results.append((text, min(random.random() * len(text), 3.0)))
+    logger.info(f"文本片段: {text}", "BYM_AI")
+    return results
 
 def split_text(text: str) -> list[tuple[str, float]]:
     """文本切割"""
@@ -346,7 +368,8 @@ class CallApi:
         send_json = {
             "stream": False,
             "model": self.tool_model if tools else self.chat_model,
-            "temperature": 0.7,
+            "temperature": 0.8,
+            "frequency_penalty": 1,
         }
         if tools:
             send_json["tools"] = [

@@ -26,7 +26,7 @@ from .bym_gift import ICON_PATH
 from .bym_gift.data_source import send_gift
 from .bym_gift.gift_reg import driver
 from .config import Arparma, FunctionParam
-from .data_source import ChatManager, base_config, split_text
+from .data_source import ChatManager, base_config, slash_split_text
 from .exception import GiftRepeatSendException, NotResultException
 from .goods_register import driver  # noqa: F401
 from .models.bym_chat import BymChat
@@ -193,51 +193,50 @@ async def _(
             return await MessageUtils.build_message("请求没有结果呢...").send(
                 reply_to=True
             )
-        if is_bym:
-            """伪人回复，切割文本"""
-            if result:
-                for r, delay in split_text(result):
-                    await MessageUtils.build_message(r).send()
-                    await asyncio.sleep(delay)
+        
+        # 所有回复都使用分割逻辑
+        if result:
+            # 使用反斜杠分割文本
+            segments = slash_split_text(result)
+            for segment, delay in segments:
+                await MessageUtils.build_message(segment).send(
+                    reply_to=bool(group_id) and not is_bym
+                )
+                await asyncio.sleep(delay)
+                
+            # 仅在非伪人回复时发送TTS
+            if not is_bym and (tts_data := await ChatManager.tts(result)):
+                await MessageUtils.build_message(Voice(raw=tts_data)).send()
+                
+            # 记录到数据库和日志
+            if event.is_tome() and (plain_text := message.extract_plain_text()):
+                await BymChat.create(
+                    user_id=session.user.id,
+                    group_id=group_id,
+                    plain_text=plain_text,
+                    result=result,
+                )
+            logger.info(
+                f"BYM AI 问题: {message} | 回答: {result}",
+                "BYM_AI",
+                session=session,
+            )
+        elif not base_config.get("BYM_AI_CHAT_SMART"):
+            await MessageUtils.build_message(ChatManager.no_result()).send()
         else:
-            try:
-                if result:
-                    await MessageUtils.build_message(result).send(
-                        reply_to=bool(group_id)
-                    )
-                    if tts_data := await ChatManager.tts(result):
-                        await MessageUtils.build_message(Voice(raw=tts_data)).send()
-                elif not base_config.get("BYM_AI_CHAT_SMART"):
-                    await MessageUtils.build_message(ChatManager.no_result()).send()
-                else:
-                    await MessageUtils.build_message(
-                        f"{BotConfig.self_nickname}并不想理你..."
-                    ).send(reply_to=True)
-                if (
-                    event.is_tome()
-                    and result
-                    and (plain_text := message.extract_plain_text())
-                ):
-                    await BymChat.create(
-                        user_id=session.user.id,
-                        group_id=group_id,
-                        plain_text=plain_text,
-                        result=result,
-                    )
-                logger.info(
-                    f"BYM AI 问题: {message} | 回答: {result}",
-                    "BYM_AI",
-                    session=session,
-                )
-            except HTTPStatusError as e:
-                logger.error("BYM AI 请求失败", "BYM_AI", session=session, e=e)
-                await MessageUtils.build_message(
-                    f"请求失败了哦，code: {e.response.status_code}"
-                ).send(reply_to=True)
-            except NotResultException:
-                await MessageUtils.build_message("请求没有结果呢...").send(
-                    reply_to=True
-                )
+            await MessageUtils.build_message(
+                f"{BotConfig.self_nickname}并不想理你..."
+            ).send(reply_to=True)
+            
+    except HTTPStatusError as e:
+        logger.error("BYM AI 请求失败", "BYM_AI", session=session, e=e)
+        await MessageUtils.build_message(
+            f"请求失败了哦，code: {e.response.status_code}"
+        ).send(reply_to=True)
+    except NotResultException:
+        await MessageUtils.build_message("请求没有结果呢...").send(
+            reply_to=True
+        )
     except GiftRepeatSendException:
         logger.warning("BYM AI 重复发送礼物", "BYM_AI", session=session)
         await MessageUtils.build_message(
