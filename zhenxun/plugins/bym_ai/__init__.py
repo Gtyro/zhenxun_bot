@@ -198,9 +198,11 @@ async def _(
         if result:
             # 使用反斜杠分割文本
             segments = slash_split_text(result)
-            for segment, delay in segments:
+            for i, (segment, delay) in enumerate(segments):
+                # 只有第一个片段引用原消息
+                is_first_segment = i == 0
                 await MessageUtils.build_message(segment).send(
-                    reply_to=bool(group_id) and not is_bym
+                    reply_to=bool(group_id) and not is_bym and is_first_segment
                 )
                 await asyncio.sleep(delay)
                 
